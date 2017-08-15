@@ -50,13 +50,15 @@ module Network.IMAP (
   fetchG,
   uidFetchG,
   store,
+  uidStore,
   copy,
+  uidCopy,
   simpleFormat
 ) where
 
 import Network.Connection
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import qualified Data.ByteString.Char8 as BSC
 
 import qualified Data.STM.RollingQueue as RQ
@@ -75,6 +77,7 @@ import Control.Monad (MonadPlus(..), when)
 import Control.Monad.IO.Class (MonadIO(..))
 import ListT (toList, ListT)
 import qualified Data.List as L
+import qualified Debug.Trace as DT
 
 -- |Connects to the server and gives you a connection object
 --  that needs to be passed to any other command. You should only call it once
@@ -292,7 +295,7 @@ fetch :: (MonadPlus m, MonadIO m, Universe m) => IMAPConnection ->
 fetch conn query = sendCommand conn $ encodeUtf8 command
   where command = T.intercalate " " ["FETCH", query, "BODY[]"]
 
--- |Fetch message body my message UID
+-- |Fetch message body by message UID
 uidFetch :: (MonadPlus m, MonadIO m, Universe m) => IMAPConnection ->
   T.Text -> m CommandResult
 uidFetch conn query = sendCommand conn $ encodeUtf8 command
@@ -317,6 +320,14 @@ store conn sequenceSet dataItem flagList = do
                                      encodeUtf8 dataItem, flagsToText flagList]
   sendCommand conn command
 
+uidStore :: (MonadPlus m, MonadIO m, Universe m) => IMAPConnection ->
+  T.Text -> T.Text -> [Flag] -> m CommandResult
+uidStore conn sequenceSet dataItem flagList = do
+  let command = BSC.intercalate " " ["UID STORE", encodeUtf8 sequenceSet,
+                                     encodeUtf8 dataItem, flagsToText flagList]
+  liftIO $ putStrLn $ show command
+  sendCommand conn command
+
 
 copy :: (MonadPlus m, MonadIO m, Universe m) => IMAPConnection ->
   T.Text -> T.Text -> m CommandResult
@@ -324,11 +335,18 @@ copy conn sequenceSet mailboxName = sendCommand conn command
   where command = BSC.intercalate " " ["COPY", encodeUtf8 sequenceSet,
                                        encodeUtf8 mailboxName]
 
+-- |Copy message by message UID
+uidCopy :: (MonadPlus m, MonadIO m, Universe m) => IMAPConnection ->
+  T.Text -> T.Text -> m CommandResult
+uidCopy conn sequenceSet mailboxName = sendCommand conn $ encodeUtf8 command
+  where command = T.intercalate " " ["UID COPY", sequenceSet, mailboxName]
+
+
 -- |Return the untagged replies or an error message if the tagged reply
 --  is of type NO or BAD. Also return all untagged replies received if
 --  replies list contains a BYE response
 --  (when the server decided to cleanly disconnect)
-simpleFormat :: (MonadIO m) =>
+simpleFormat :: (MonadIO m, Universe m) =>
                 ListT m CommandResult -> m SimpleResult
 simpleFormat action = do
   results <- toList action
